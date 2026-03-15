@@ -8,3 +8,16 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Test data files
+*.h5
+*.hdf5
+
+# Editor/OS
+.DS_Store
+*.swp
