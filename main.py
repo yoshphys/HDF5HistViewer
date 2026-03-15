@@ -7,12 +7,12 @@ import h5py
 import numpy as np
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 
 try:
     import ROOT
-    ROOT.gROOT.SetBatch(False)
+    ROOT.gROOT.SetWebDisplay("browser")
     HAS_ROOT = True
 except ImportError:
     HAS_ROOT = False
@@ -41,6 +41,49 @@ def hist_ndim(node) -> int:
         if f"edges_{dim}" in node:
             return dim
     return 0
+
+
+def hist_stats(node) -> dict:
+    """Compute weighted statistics from an FHist histogram node.
+
+    Returns a dict with keys:
+      mean      – ndarray of shape (ndim,)
+      std       – ndarray of shape (ndim,)
+      cov       – ndarray of shape (ndim, ndim)  (covariance matrix)
+      corr      – ndarray of shape (ndim, ndim)  (correlation matrix)
+    """
+    ndim = hist_ndim(node)
+    weights = node["weights"][()].astype(np.float64)
+    total = weights.sum()
+
+    # Build arrays of bin centers for each axis
+    centers = []
+    for d in range(1, ndim + 1):
+        edges = node[f"edges_{d}"][()].astype(np.float64)
+        centers.append(0.5 * (edges[:-1] + edges[1:]))
+
+    # Broadcast center grids to the full N-D shape
+    grids = np.meshgrid(*centers, indexing="ij")  # each has shape of weights
+
+    mean = np.array([(g * weights).sum() / total for g in grids])
+
+    # Covariance matrix
+    cov = np.zeros((ndim, ndim))
+    for i in range(ndim):
+        di = grids[i] - mean[i]
+        for j in range(i, ndim):
+            dj = grids[j] - mean[j]
+            c = (di * dj * weights).sum() / total
+            cov[i, j] = cov[j, i] = c
+
+    std = np.sqrt(np.diag(cov))
+
+    # Correlation matrix (guard against zero std)
+    with np.errstate(invalid="ignore"):
+        corr = cov / np.outer(std, std)
+    corr = np.where(np.isfinite(corr), corr, 0.0)
+
+    return {"mean": mean, "std": std, "cov": cov, "corr": corr}
 
 
 # ---------------------------------------------------------------------------
@@ -115,8 +158,8 @@ def draw_histogram(node, name: str):
 class HDF5Completer(Completer):
     """prompt_toolkit Completer for HDF5Shell commands and paths."""
 
-    COMMANDS = ["cd", "draw", "exit", "ls", "pwd", "tree"]
-    PATH_COMMANDS = {"cd", "draw", "ls", "tree"}
+    COMMANDS = ["cd", "draw", "exit", "info", "ls", "pwd", "tree"]
+    PATH_COMMANDS = {"cd", "draw", "info", "ls", "tree"}
 
     def __init__(self, shell: "HDF5Shell"):
         self.shell = shell
@@ -174,8 +217,14 @@ class HDF5Shell:
         self.file = h5py.File(filepath, "r")
         self.cwd = "/"
 
+        history_path = os.path.join(
+            os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+            "hdf5histviewer", "history",
+        )
+        os.makedirs(os.path.dirname(history_path), exist_ok=True)
+
         self._session = PromptSession(
-            history=InMemoryHistory(),
+            history=FileHistory(history_path),
             completer=HDF5Completer(self),
             auto_suggest=AutoSuggestFromHistory(),
             complete_while_typing=False,  # complete only on Tab
@@ -279,6 +328,56 @@ class HDF5Shell:
             else:
                 print(f"{prefix}{connector}{name}")
 
+    def cmd_info(self, args):
+        path = self._resolve(args[0]) if args else self.cwd
+        node = self._node(path)
+        if node is None:
+            print(f"info: {args[0] if args else '.'}: No such path")
+            return
+        if not is_histogram(node):
+            print(f"info: {path}: Not a histogram")
+            return
+
+        ndim = hist_ndim(node)
+        weights = node["weights"][()]
+        axes = ("X", "Y", "Z")[:ndim]
+
+        print(f"Path     : {path}")
+        print(f"Type     : Hist{ndim}D")
+        print(f"Integral : {weights.sum():.6g}")
+        if "nentries" in node.attrs:
+            print(f"Entries  : {node.attrs['nentries']}")
+        if "overflow" in node.attrs:
+            print(f"Overflow : {node.attrs['overflow']}")
+        for dim in range(1, ndim + 1):
+            edges = node[f"edges_{dim}"][()]
+            nbins = len(edges) - 1
+            axis = axes[dim - 1]
+            print(f"Axis {axis}   : {nbins} bins  [{edges[0]:.6g}, {edges[-1]:.6g}]")
+
+        stats = hist_stats(node)
+        print()
+        for i, ax in enumerate(axes):
+            print(f"Mean {ax}  : {stats['mean'][i]:.6g}")
+        for i, ax in enumerate(axes):
+            print(f"Std  {ax}  : {stats['std'][i]:.6g}")
+
+        if ndim >= 2:
+            print()
+            labels = axes
+            width = max(len(lb) for lb in labels)
+            header = "Cov       " + "  ".join(f"{lb:>{width+9}}" for lb in labels)
+            print(header)
+            for i, lb_i in enumerate(labels):
+                row = "  ".join(f"{stats['cov'][i, j]:+.6e}" for j in range(ndim))
+                print(f"  {lb_i:{width}}       {row}")
+            print()
+            header = "Corr      " + "  ".join(f"{lb:>{width+9}}" for lb in labels)
+            print(header)
+            for i, lb_i in enumerate(labels):
+                row = "  ".join(f"{stats['corr'][i, j]:+.6f}" for j in range(ndim))
+                print(f"  {lb_i:{width}}       {row}")
+
     def cmd_draw(self, args):
         if not args:
             print("Usage: draw <histogram_path>")
@@ -299,7 +398,7 @@ class HDF5Shell:
 
     def run(self):
         print(f"HDF5 Histogram Viewer  |  {self.filepath}")
-        print("Commands: exit  pwd  ls [path]  cd [path]  tree [path]  draw <path>")
+        print("Commands: exit  pwd  ls [path]  cd [path]  tree [path]  info <path>  draw <path>")
         print("Tab completion, emacs keybindings, and history (C-r) are enabled.\n")
 
         dispatch = {
@@ -307,6 +406,7 @@ class HDF5Shell:
             "ls":   self.cmd_ls,
             "cd":   self.cmd_cd,
             "tree": self.cmd_tree,
+            "info": self.cmd_info,
             "draw": self.cmd_draw,
         }
 
@@ -334,6 +434,7 @@ class HDF5Shell:
                 dispatch[cmd](args)
             else:
                 print(f"Unknown command: {cmd}  (try: exit pwd ls cd tree draw)")
+
 
         self.file.close()
 

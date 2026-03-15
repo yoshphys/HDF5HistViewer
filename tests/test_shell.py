@@ -249,6 +249,57 @@ class TestTree:
 
 
 # ---------------------------------------------------------------------------
+# info
+# ---------------------------------------------------------------------------
+
+class TestInfo:
+    def test_info_1d(self, shell):
+        out = capture(shell.cmd_info, ["student/boy/height"])
+        assert "Hist1D" in out
+        assert "Axis X" in out
+        assert "Integral" in out
+        assert "Mean X" in out
+        assert "Std  X" in out
+        # 1D: no covariance matrix
+        assert "Cov" not in out
+
+    def test_info_2d(self, shell):
+        out = capture(shell.cmd_info, ["student/boy/height_vs_weight"])
+        assert "Hist2D" in out
+        assert "Axis X" in out
+        assert "Axis Y" in out
+        assert "Mean X" in out
+        assert "Mean Y" in out
+        assert "Cov" in out
+        assert "Corr" in out
+
+    def test_info_3d(self, shell):
+        out = capture(shell.cmd_info, ["student/boy/score_3d"])
+        assert "Hist3D" in out
+        assert "Axis Z" in out
+        assert "Mean Z" in out
+        assert "Cov" in out
+        assert "Corr" in out
+
+    def test_info_stats_values(self, shell):
+        # mean of boy/height should be close to 170
+        out = capture(shell.cmd_info, ["student/boy/height"])
+        for line in out.splitlines():
+            if line.startswith("Mean X"):
+                mean_val = float(line.split(":")[1].strip())
+                assert 160 < mean_val < 180
+                break
+
+    def test_info_not_histogram(self, shell):
+        out = capture(shell.cmd_info, ["student/boy"])
+        assert "Not a histogram" in out
+
+    def test_info_missing(self, shell):
+        out = capture(shell.cmd_info, ["nowhere"])
+        assert "No such path" in out
+
+
+# ---------------------------------------------------------------------------
 # draw (ROOT-free)
 # ---------------------------------------------------------------------------
 
