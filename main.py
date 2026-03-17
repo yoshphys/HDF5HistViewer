@@ -90,7 +90,7 @@ def hist_stats(node) -> dict:
 # ROOT drawing
 # ---------------------------------------------------------------------------
 
-def draw_histogram(node, name: str):
+def draw_histogram(node, name: str, title: str):
     """Create and draw a ROOT histogram from an FHist.jl HDF5 group."""
     if not HAS_ROOT:
         print("ROOT is not available.")
@@ -103,25 +103,25 @@ def draw_histogram(node, name: str):
     if ndim == 1:
         edges = node["edges_1"][()].astype(np.float64)
         nbins = len(edges) - 1
-        h = ROOT.TH1D(name, name, nbins, edges)
+        h = ROOT.TH1D(name, title, nbins, edges)
         h.Sumw2(False)
         for i in range(nbins):
             h.SetBinContent(i + 1, float(weights[i]))
             h.SetBinError(i + 1, float(np.sqrt(max(sumw2[i], 0.0))))
-        c = ROOT.TCanvas(f"c_{name}", name, 800, 600)
+        c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
         h.Draw()
 
     elif ndim == 2:
         edges_x = node["edges_1"][()].astype(np.float64)
         edges_y = node["edges_2"][()].astype(np.float64)
         nbins_x, nbins_y = len(edges_x) - 1, len(edges_y) - 1
-        h = ROOT.TH2D(name, name, nbins_x, edges_x, nbins_y, edges_y)
+        h = ROOT.TH2D(name, title, nbins_x, edges_x, nbins_y, edges_y)
         h.Sumw2(False)
         for ix in range(nbins_x):
             for iy in range(nbins_y):
                 h.SetBinContent(ix + 1, iy + 1, float(weights[ix, iy]))
                 h.SetBinError(ix + 1, iy + 1, float(np.sqrt(max(sumw2[ix, iy], 0.0))))
-        c = ROOT.TCanvas(f"c_{name}", name, 800, 600)
+        c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
         h.Draw("COLZ")
 
     elif ndim == 3:
@@ -131,14 +131,14 @@ def draw_histogram(node, name: str):
         nbins_x = len(edges_x) - 1
         nbins_y = len(edges_y) - 1
         nbins_z = len(edges_z) - 1
-        h = ROOT.TH3D(name, name, nbins_x, edges_x, nbins_y, edges_y, nbins_z, edges_z)
+        h = ROOT.TH3D(name, title, nbins_x, edges_x, nbins_y, edges_y, nbins_z, edges_z)
         h.Sumw2(False)
         for ix in range(nbins_x):
             for iy in range(nbins_y):
                 for iz in range(nbins_z):
                     h.SetBinContent(ix + 1, iy + 1, iz + 1, float(weights[ix, iy, iz]))
                     h.SetBinError(ix + 1, iy + 1, iz + 1, float(np.sqrt(max(sumw2[ix, iy, iz], 0.0))))
-        c = ROOT.TCanvas(f"c_{name}", name, 800, 600)
+        c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
         h.Draw("BOX")
 
     else:
@@ -390,7 +390,7 @@ class HDF5Shell:
         if not is_histogram(node):
             print(f"draw: {args[0]}: Not a histogram")
             return
-        draw_histogram(node, os.path.basename(path))
+        draw_histogram(node, os.path.basename(path), path)
 
     # ------------------------------------------------------------------
     # Main loop
