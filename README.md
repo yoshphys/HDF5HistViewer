@@ -4,9 +4,9 @@ An interactive CLI tool for browsing and visualizing histograms stored in HDF5 f
 
 ## Requirements
 
-- Python 3.13+
-- [uv](https://github.com/astral-sh/uv)
-- ROOT 6.26+ (for `draw` command)
+- [Nix](https://nixos.org/download/) with flakes enabled
+
+All other dependencies (Python, ROOT, h5py, etc.) are managed automatically via `flake.nix`.
 
 ## Installation
 
@@ -29,6 +29,8 @@ export PATH="$PATH:/path/to/HDF5HistViewer"
 ```bash
 ./hdf5hist <file.h5>
 ```
+
+On the first run, Nix downloads and builds all dependencies. Subsequent runs use the cache and start quickly.
 
 The tool launches an interactive shell that navigates the HDF5 file as a directory tree.
 
@@ -109,9 +111,6 @@ Supported dimensionalities: 1D, 2D, 3D.
 Generate sample HDF5 data and run the test suite:
 
 ```bash
-# Generate test data (optional — only needed for manual testing)
-uv run python create_test_data.py test_data.h5
-
-# Run tests
-uv run pytest tests/ -v
+nix develop --command python create_test_data.py test_data.h5
+nix develop --command pytest tests/ -v
 ```

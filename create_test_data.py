@@ -94,16 +94,11 @@ def create(path: str, rng: np.random.Generator):
     print(f"Created: {path}")
     print("Structure:")
     with h5py.File(path, "r") as f:
-        _print_tree(f["/"], "", True)
-
-
-def _print_tree(node, prefix, is_root):
-    if is_root:
         print("/")
-        items = list(node.items())
+        items = list(f["/"].items())
         for i, (name, child) in enumerate(items):
             _print_tree(child, "", i == len(items) - 1, name)
-        return
+
 
 def _print_tree(node, prefix, last, name=""):
     connector = "└── " if last else "├── "
@@ -114,7 +109,6 @@ def _print_tree(node, prefix, last, name=""):
         for i, (cname, child) in enumerate(items):
             _print_tree(child, child_prefix, i == len(items) - 1, cname)
     elif isinstance(node, h5py.Group):
-        # histogram: count dimensions
         ndim = sum(1 for k in node.keys() if k.startswith("edges_"))
         print(f"{prefix}{connector}{name}  [Hist{ndim}D]")
     else:

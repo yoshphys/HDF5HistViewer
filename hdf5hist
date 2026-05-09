@@ -32,4 +32,4 @@ case "$1" in
         ;;
 esac
 
-exec uv run --project "$SCRIPT_DIR" python "$SCRIPT_DIR/main.py" "$@"
+exec nix develop "$SCRIPT_DIR" --command python "$SCRIPT_DIR/main.py" "$@"
