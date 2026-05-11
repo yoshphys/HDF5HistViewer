@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_resolve_symlink() {
+    local path="$1"
+    while [ -L "$path" ]; do
+        local target
+        target="$(readlink "$path")"
+        [[ "$target" = /* ]] || target="$(dirname "$path")/$target"
+        path="$target"
+    done
+    echo "$path"
+}
+SCRIPT_DIR="$(cd "$(dirname "$(_resolve_symlink "${BASH_SOURCE[0]}")")" && pwd)"
 
 usage() {
     cat <<EOF
