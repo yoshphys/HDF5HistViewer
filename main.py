@@ -100,6 +100,8 @@ def draw_histogram(node, name: str, title: str):
     weights = node["weights"][()]
     sumw2 = node["sumw2"][()]
 
+    n_entries = int(node.attrs["nentries"]) if "nentries" in node.attrs else int(weights.sum())
+
     if ndim == 1:
         edges = node["edges_1"][()].astype(np.float64)
         nbins = len(edges) - 1
@@ -108,6 +110,7 @@ def draw_histogram(node, name: str, title: str):
         for i in range(nbins):
             h.SetBinContent(i + 1, float(weights[i]))
             h.SetBinError(i + 1, float(np.sqrt(max(sumw2[i], 0.0))))
+        h.SetEntries(n_entries)
         c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
         h.Draw()
 
@@ -121,6 +124,7 @@ def draw_histogram(node, name: str, title: str):
             for iy in range(nbins_y):
                 h.SetBinContent(ix + 1, iy + 1, float(weights[ix, iy]))
                 h.SetBinError(ix + 1, iy + 1, float(np.sqrt(max(sumw2[ix, iy], 0.0))))
+        h.SetEntries(n_entries)
         c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
         h.Draw("COLZ")
 
@@ -138,6 +142,7 @@ def draw_histogram(node, name: str, title: str):
                 for iz in range(nbins_z):
                     h.SetBinContent(ix + 1, iy + 1, iz + 1, float(weights[ix, iy, iz]))
                     h.SetBinError(ix + 1, iy + 1, iz + 1, float(np.sqrt(max(sumw2[ix, iy, iz], 0.0))))
+        h.SetEntries(n_entries)
         c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
         h.Draw("BOX")
 
