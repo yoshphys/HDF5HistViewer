@@ -13,13 +13,11 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 try:
     import ROOT
     ROOT.gROOT.SetWebDisplay("browser")
+    ROOT.TH1.AddDirectory(False)
     HAS_ROOT = True
 except ImportError:
     HAS_ROOT = False
     print("Warning: ROOT not available. 'draw' command will not work.", file=sys.stderr)
-
-# Keep ROOT objects alive to prevent garbage collection
-_draw_refs = []
 
 
 # ---------------------------------------------------------------------------
@@ -90,70 +88,99 @@ def hist_stats(node) -> dict:
 # ROOT drawing
 # ---------------------------------------------------------------------------
 
-def draw_histogram(node, name: str, title: str):
-    """Create and draw a ROOT histogram from an FHist.jl HDF5 group."""
-    if not HAS_ROOT:
-        print("ROOT is not available.")
-        return
+class CanvasManager:
+    def __init__(self):
+        self._canvases: list = []
+        self._hists: list = []
+        self._active: int = -1
 
-    ndim = hist_ndim(node)
-    weights = node["weights"][()]
-    sumw2 = node["sumw2"][()]
+    def close_all(self):
+        for c in self._canvases:
+            c.Close()
+        self._hists.clear()
+        self._canvases.clear()
+        self._active = -1
 
-    n_entries = int(node.attrs["nentries"]) if "nentries" in node.attrs else int(weights.sum())
+    def new_canvas(self) -> int:
+        if not HAS_ROOT:
+            print("ROOT is not available.")
+            return -1
+        n = len(self._canvases) + 1
+        c = ROOT.TCanvas(f"hdf5viewer_{n}", f"HDF5 Histogram Viewer [{n}]", 800, 600)
+        self._canvases.append(c)
+        self._hists.append(None)
+        self._active = len(self._canvases) - 1
+        return n
 
-    if ndim == 1:
-        edges = node["edges_1"][()].astype(np.float64)
-        nbins = len(edges) - 1
-        h = ROOT.TH1D(name, title, nbins, edges)
-        h.Sumw2(False)
-        for i in range(nbins):
-            h.SetBinContent(i + 1, float(weights[i]))
-            h.SetBinError(i + 1, float(np.sqrt(max(sumw2[i], 0.0))))
-        h.SetEntries(n_entries)
-        c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
-        h.Draw()
+    def draw(self, node, name: str, title: str):
+        if not HAS_ROOT:
+            print("ROOT is not available.")
+            return
 
-    elif ndim == 2:
-        edges_x = node["edges_1"][()].astype(np.float64)
-        edges_y = node["edges_2"][()].astype(np.float64)
-        nbins_x, nbins_y = len(edges_x) - 1, len(edges_y) - 1
-        h = ROOT.TH2D(name, title, nbins_x, edges_x, nbins_y, edges_y)
-        h.Sumw2(False)
-        for ix in range(nbins_x):
-            for iy in range(nbins_y):
-                h.SetBinContent(ix + 1, iy + 1, float(weights[ix, iy]))
-                h.SetBinError(ix + 1, iy + 1, float(np.sqrt(max(sumw2[ix, iy], 0.0))))
-        h.SetEntries(n_entries)
-        c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
-        h.Draw("COLZ")
+        if self._active == -1:
+            self.new_canvas()
 
-    elif ndim == 3:
-        edges_x = node["edges_1"][()].astype(np.float64)
-        edges_y = node["edges_2"][()].astype(np.float64)
-        edges_z = node["edges_3"][()].astype(np.float64)
-        nbins_x = len(edges_x) - 1
-        nbins_y = len(edges_y) - 1
-        nbins_z = len(edges_z) - 1
-        h = ROOT.TH3D(name, title, nbins_x, edges_x, nbins_y, edges_y, nbins_z, edges_z)
-        h.Sumw2(False)
-        for ix in range(nbins_x):
-            for iy in range(nbins_y):
-                for iz in range(nbins_z):
-                    h.SetBinContent(ix + 1, iy + 1, iz + 1, float(weights[ix, iy, iz]))
-                    h.SetBinError(ix + 1, iy + 1, iz + 1, float(np.sqrt(max(sumw2[ix, iy, iz], 0.0))))
-        h.SetEntries(n_entries)
-        c = ROOT.TCanvas(f"c_{name}", title, 800, 600)
-        h.Draw("BOX")
+        c = self._canvases[self._active]
+        ndim = hist_ndim(node)
+        weights = node["weights"][()]
+        sumw2 = node["sumw2"][()]
+        n_entries = int(node.attrs["nentries"]) if "nentries" in node.attrs else int(weights.sum())
 
-    else:
-        print(f"draw: unsupported histogram dimensionality: {ndim}")
-        return
+        if ndim == 1:
+            edges = node["edges_1"][()].astype(np.float64)
+            nbins = len(edges) - 1
+            h = ROOT.TH1D(name, title, nbins, edges)
+            h.Sumw2(False)
+            for i in range(nbins):
+                h.SetBinContent(i + 1, float(weights[i]))
+                h.SetBinError(i + 1, float(np.sqrt(max(sumw2[i], 0.0))))
+            h.SetEntries(n_entries)
+            c.cd()
+            c.Clear()
+            h.Draw()
 
-    c.Update()
-    c.Draw()
-    _draw_refs.extend([h, c])
-    print(f"Drew Hist{ndim}D '{name}'")
+        elif ndim == 2:
+            edges_x = node["edges_1"][()].astype(np.float64)
+            edges_y = node["edges_2"][()].astype(np.float64)
+            nbins_x, nbins_y = len(edges_x) - 1, len(edges_y) - 1
+            h = ROOT.TH2D(name, title, nbins_x, edges_x, nbins_y, edges_y)
+            h.Sumw2(False)
+            for ix in range(nbins_x):
+                for iy in range(nbins_y):
+                    h.SetBinContent(ix + 1, iy + 1, float(weights[ix, iy]))
+                    h.SetBinError(ix + 1, iy + 1, float(np.sqrt(max(sumw2[ix, iy], 0.0))))
+            h.SetEntries(n_entries)
+            c.cd()
+            c.Clear()
+            h.Draw("COLZ")
+
+        elif ndim == 3:
+            edges_x = node["edges_1"][()].astype(np.float64)
+            edges_y = node["edges_2"][()].astype(np.float64)
+            edges_z = node["edges_3"][()].astype(np.float64)
+            nbins_x = len(edges_x) - 1
+            nbins_y = len(edges_y) - 1
+            nbins_z = len(edges_z) - 1
+            h = ROOT.TH3D(name, title, nbins_x, edges_x, nbins_y, edges_y, nbins_z, edges_z)
+            h.Sumw2(False)
+            for ix in range(nbins_x):
+                for iy in range(nbins_y):
+                    for iz in range(nbins_z):
+                        h.SetBinContent(ix + 1, iy + 1, iz + 1, float(weights[ix, iy, iz]))
+                        h.SetBinError(ix + 1, iy + 1, iz + 1, float(np.sqrt(max(sumw2[ix, iy, iz], 0.0))))
+            h.SetEntries(n_entries)
+            c.cd()
+            c.Clear()
+            h.Draw("BOX")
+
+        else:
+            print(f"draw: unsupported histogram dimensionality: {ndim}")
+            return
+
+        c.Update()
+        c.Draw()
+        self._hists[self._active] = h
+        print(f"Drew Hist{ndim}D '{name}' on canvas {self._active + 1}")
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +190,7 @@ def draw_histogram(node, name: str, title: str):
 class HDF5Completer(Completer):
     """prompt_toolkit Completer for HDF5Shell commands and paths."""
 
-    COMMANDS = ["cd", "draw", "exit", "info", "ls", "pwd", "tree"]
+    COMMANDS = ["cd", "draw", "exit", "info", "ls", "newcanvas", "pwd", "tree"]
     PATH_COMMANDS = {"cd", "draw", "info", "ls", "tree"}
 
     def __init__(self, shell: "HDF5Shell"):
@@ -217,10 +244,11 @@ class HDF5Completer(Completer):
 
 
 class HDF5Shell:
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, canvas_mgr: CanvasManager):
         self.filepath = filepath
         self.file = h5py.File(filepath, "r")
         self.cwd = "/"
+        self._canvas_mgr = canvas_mgr
 
         history_path = os.path.join(
             os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
@@ -395,7 +423,12 @@ class HDF5Shell:
         if not is_histogram(node):
             print(f"draw: {args[0]}: Not a histogram")
             return
-        draw_histogram(node, os.path.basename(path), path)
+        self._canvas_mgr.draw(node, os.path.basename(path), path)
+
+    def cmd_newcanvas(self, _args):
+        n = self._canvas_mgr.new_canvas()
+        if n != -1:
+            print(f"Canvas {n} created")
 
     # ------------------------------------------------------------------
     # Main loop
@@ -403,16 +436,17 @@ class HDF5Shell:
 
     def run(self):
         print(f"HDF5 Histogram Viewer  |  {self.filepath}")
-        print("Commands: exit  pwd  ls [path]  cd [path]  tree [path]  info <path>  draw <path>")
+        print("Commands: exit  pwd  ls [path]  cd [path]  tree [path]  info <path>  draw <path>  newcanvas")
         print("Tab completion, emacs keybindings, and history (C-r) are enabled.\n")
 
         dispatch = {
-            "pwd":  self.cmd_pwd,
-            "ls":   self.cmd_ls,
-            "cd":   self.cmd_cd,
-            "tree": self.cmd_tree,
-            "info": self.cmd_info,
-            "draw": self.cmd_draw,
+            "pwd":       self.cmd_pwd,
+            "ls":        self.cmd_ls,
+            "cd":        self.cmd_cd,
+            "tree":      self.cmd_tree,
+            "info":      self.cmd_info,
+            "draw":      self.cmd_draw,
+            "newcanvas": self.cmd_newcanvas,
         }
 
         while True:
@@ -438,9 +472,10 @@ class HDF5Shell:
             elif cmd in dispatch:
                 dispatch[cmd](args)
             else:
-                print(f"Unknown command: {cmd}  (try: exit pwd ls cd tree draw)")
+                print(f"Unknown command: {cmd}  (try: exit pwd ls cd tree draw newcanvas)")
 
 
+        self._canvas_mgr.close_all()
         self.file.close()
 
 
@@ -458,14 +493,9 @@ def main():
         print(f"Error: file not found: {filepath}")
         sys.exit(1)
 
-    shell = HDF5Shell(filepath)
+    canvas_mgr = CanvasManager()
+    shell = HDF5Shell(filepath, canvas_mgr)
     shell.run()
-
-    if HAS_ROOT and _draw_refs:
-        try:
-            PromptSession().prompt("Press Enter to exit and close all plots...")
-        except (EOFError, KeyboardInterrupt):
-            pass
 
 
 if __name__ == "__main__":
